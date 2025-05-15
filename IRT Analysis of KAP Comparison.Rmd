@@ -1,0 +1,1841 @@
+---
+title: "IRT Analysis of KAP Comparison"
+author: "Abrar"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+**Packages**
+```{r, message=FALSE, warning=FALSE}
+
+##Load all packages
+packages <- c(
+   "eRm", "ltm", "difR", "msm", "polycor", "MASS", "psych", "irtoys", "sm", "mirt", "latticeExtra", "ggplot2",
+  "cowplot", "ggrepel", "tidyverse"  
+  )
+
+#install.packages(packages)
+library("eRm")
+library("ltm")
+library("difR")
+library("msm")
+library("polycor")
+library("MASS")
+library("psych")
+library("ltm")
+library("irtoys")
+library("sm")
+library("mirt")
+library("latticeExtra")
+library("ggplot2")
+library("cowplot")
+library("ggrepel")
+library("tidyverse")
+
+
+```
+
+
+**Public Health Professionals**
+```{r, message=FALSE, warning=FALSE} 
+
+##Data Preparation & Scoring
+
+kap_ph <- read.csv("C:/Users/abrar/OneDrive - University of Illinois - Urbana/Documents/Abrar Hussain/Ph.D/Ph.D. Papers/As Authors/KAP (Metanalysis)/Qualitative Part/Selected Question Responses for IRT/CSV/public health professionals.csv")
+
+# Rename columns for easier access
+names(kap_ph)[1] <- "Pin"  # Assuming column 1 is the unique ID
+names(kap_ph)[2:6] <- paste0("Q", 1:5)  # Assuming Q1–Q5 are columns 2-6
+
+# Scoring logic
+kap_ph$s1 <- ifelse(grepl("hair|arms|belly|groin", kap_ph$Q1, ignore.case = TRUE), 1, 0)
+kap_ph$s2 <- ifelse(grepl("yes", kap_ph$Q2, ignore.case = TRUE), 1, 0)
+kap_ph$s3 <- ifelse(grepl("yes", kap_ph$Q3, ignore.case = TRUE), 1, 0)
+kap_ph$s4 <- ifelse(grepl("concerned|very concerned", kap_ph$Q4, ignore.case = TRUE), 1, 0)
+kap_ph$s5 <- ifelse(grepl("yes", kap_ph$Q5, ignore.case = TRUE), 1, 0)
+
+# Total score (summing binary scores)
+kap_ph$score_total <- rowSums(kap_ph[, paste0("s", 1:5)])
+
+#Set directory to save all outputs
+setwd("C:/Users/abrar/OneDrive - University of Illinois - Urbana/Documents/IRT Output")
+
+# Save and export
+save(kap_ph, file = "kap_ph_IRTScored.Rdata")
+write.csv(kap_ph, "kap_ph_IRTScored.csv", row.names = FALSE)
+
+#_________
+
+##Getting beta values from Rasch model (simple) to asses the difficulty of questions
+
+#select only cleaned answers for analysis
+kap_ph_irt=dplyr::select(kap_ph,s1,s2,s3,s4,s5)
+
+# Fit Rasch Model (The Rasch model is a type of Item Response Theory (IRT) model — specifically, the 1-Parameter Logistic (1PL) model)
+kap_ph_rm = RM(kap_ph_irt)
+
+#Get and Sort Item Difficulties (ranks questions from easiest (most negative) to hardest (most positive))
+betas_kap_ph <- -coef(kap_ph_rm)
+round(sort(betas_kap_ph), 2)
+
+# Check if any betas are identical (could cause overlapping ICCs)
+# Interpretation:
+# - Items with lower beta values are easier (e.g., s3)
+# - Items with higher beta values are harder (e.g., s5)
+# - Items with similar beta values (s2 & s4) have similar difficulty levels
+
+#_____
+
+# Function to normalize a vector between 0 and 1
+normalize <- function(x) {
+  return((x - min(x)) / (max(x) - min(x)))
+}
+
+# Normalizing
+betas_ph <- -coef(kap_ph_rm)  # Extract Beta values from Rasch model for Public Health Professionals
+betas_ph_normalized <- normalize(betas_ph)  # Normalize Beta values
+
+# Create a data frame with normalized Beta values and corresponding questions (s1, s2, ...)
+data_ph <- data.frame(
+  Item = paste0("s", 1:length(betas_ph)),  # Create item labels (s1, s2, s3, ...)
+  Beta = betas_ph,
+  Normalized_Beta = betas_ph_normalized
+)
+
+cat("Normalized Beta values for Public Health Professionals:\n")
+print(data_ph)
+
+
+# Plot Normalized Beta Values for Public Health Professionals
+ggplot(data_ph, aes(x = Item, y = Normalized_Beta)) +
+  geom_bar(stat = "identity", fill = "indianred", show.legend = FALSE) +  # Set color for bars
+  labs(title = "Normalized Beta Values (Public Health Professionals)",
+       x = "Item", y = "Normalized Beta") +
+  theme_minimal() +
+  theme(
+    panel.grid = element_blank(), 
+    panel.background = element_rect(fill = "white"),          
+    plot.background = element_rect(fill = "white"),    
+    axis.line = element_line(color = "black")  # X and Y axis lines
+  )
+
+# Save the plot
+ggsave("kap_ph_Normalized_Beta_plot.png", width = 10, height = 6, dpi = 300)
+
+#_____
+
+## Model Fitting (Rasch, 2PL, 3PL)
+
+# Run Rasch, 2PL, and 3PL models 
+kap_ph_rasch <- rasch(kap_ph_irt)
+kap_ph_2pl <- ltm(kap_ph_irt ~ z1)     # Two-parameter logistic model
+kap_ph_3pl <- tpm(kap_ph_irt)          # Three-parameter logistic model (includes guessing)
+
+
+#_____
+
+##Model Evaluation
+
+# Extract AIC and BIC separately
+aic_values_ph <- c(
+  Rasch = AIC(kap_ph_rasch),
+  `2PL` = AIC(kap_ph_2pl),
+  `3PL` = AIC(kap_ph_3pl)
+)
+
+bic_values_ph <- c(
+  Rasch = BIC(kap_ph_rasch),
+  `2PL` = BIC(kap_ph_2pl),
+  `3PL` = BIC(kap_ph_3pl)
+)
+
+# Print results
+print(aic_values_ph)
+print(bic_values_ph)
+
+# Interpretation:
+# - AIC favors the **2PL model**, suggesting it fits the data best with a good balance of fit and complexity.
+# - BIC favors the **Rasch model**, indicating it provides a more parsimonious fit after penalizing for extra parameters.
+# - In contexts where model simplicity is preferred (e.g., psychometric testing), the Rasch model may still be appropriate.
+
+
+# Compare estimated item difficulty parameters across models
+cor_rasch_2pl_ph <- cor(coef(kap_ph_rasch)[,1], coef(kap_ph_2pl)[,1])
+cor_2pl_3pl_ph    <- cor(coef(kap_ph_2pl)[,1], coef(kap_ph_3pl)[,1])
+cor_rasch_3pl_ph  <- cor(coef(kap_ph_rasch)[,1], coef(kap_ph_3pl)[,1])
+
+cat("Correlation between Rasch and 2PL item difficulties for ph:", round(cor_rasch_2pl_ph, 2), "\n")
+cat("Correlation between 2PL and 3PL item difficulties for ph:", round(cor_2pl_3pl_ph, 2), "\n")
+cat("Correlation between Rasch and 3PL item difficulties for ph:", round(cor_rasch_3pl_ph, 2), "\n")
+
+
+# Correlation between item difficulties from different models (ph group):
+# - Rasch vs 2PL: 0.99 → Very strong agreement
+# - 2PL vs 3PL: 0.42 → Moderate agreement
+# - Rasch vs 3PL: 0.28 → Weak agreement
+#
+# Interpretation:
+# - Rasch and 2PL produce very similar item difficulty estimates.
+# - 3PL diverges more due to its complexity and the added guessing parameter.
+# - The Rasch model is appropriate here for its simplicity and strong alignment with 2PL.
+
+#_____
+
+##Item Analysis & Visualization
+
+# ICC Plot
+# Prepare ICC data from actual item difficulties
+theta_vals <- seq(-4, 4, length.out = 300)
+icc_df <- do.call(rbind, lapply(names(betas_kap_ph), function(item) {
+  beta <- betas_kap_ph[item]
+  p <- exp(theta_vals - beta) / (1 + exp(theta_vals - beta))  # Rasch model formula
+  data.frame(theta = theta_vals, probability = p, item = item)
+}))
+
+# Plot ICCs using ggplot2
+ggplot(icc_df, aes(x = theta, y = probability, color = item)) +
+  geom_line(size = 1) +
+  theme_minimal(base_size = 14) +
+  labs(
+    title = "Item Characteristic Curves (Public Health Professional)",
+    x = expression(theta ~ "(Latent Trait Ability)"),
+    y = "Probability of Correct Response",
+    color = "Item"
+  ) +
+  theme(
+    panel.grid = element_blank(),                             
+    panel.background = element_rect(fill = "white"),          
+    plot.background = element_rect(fill = "white"),           
+    axis.line = element_line(color = "black", size = 0.5),    
+    axis.ticks = element_line(color = "black")                
+  )
+
+# Save to file (optional)
+ggsave("kap_ph_ICC_plot.png", width = 10, height = 6, dpi = 300)
+
+
+# Item Characteristic Curves (ICCs) plot shows how the probability of a correct response 
+# changes across different levels of latent ability (θ) for each item.
+#
+# - Negative θ values indicate lower ability or knowledge
+# - Positive θ values indicate higher ability
+# - θ = 0 represents average ability level
+#
+# Each curve represents one item (e.g., beta s2, beta s3, etc.).
+#
+# - The steepest point of each curve indicates where the item is most informative 
+#   (i.e., the difficulty level of the item)
+# - If a curve is shifted to the right → the item is harder (e.g., beta s5)
+# - If a curve is shifted to the left → the item is easier (e.g., beta s3)
+
+
+
+# Person-Item Map (Wright Map) 
+# Prepare data
+pp <- person.parameter(kap_ph_rm)
+person_scores <- coef(pp)
+person_scores <- coef(pp)
+item_difficulties <- betas_kap_ph
+
+# Data frames
+person_df <- data.frame(
+  location = person_scores,
+  type = "Person",
+  label = NA
+)
+
+item_df <- data.frame(
+  location = item_difficulties,
+  type = "Item",
+  label = names(item_difficulties)
+)
+
+# Combine
+map_df <- rbind(person_df, item_df)
+
+# Plot
+ggplot(map_df, aes(x = type, y = location)) +
+  geom_jitter(width = 0.15, size = 2, aes(color = type), show.legend = FALSE) +
+  
+  # Smarter label placement for items using ggrepel
+  ggrepel::geom_text_repel(
+    data = subset(map_df, type == "Item"),
+    aes(label = label),
+    nudge_x = 0.25,
+    size = 4,
+    direction = "y",
+    segment.color = "grey50",
+    max.overlaps = 10
+  ) +
+
+  scale_color_manual(values = c("Person" = "skyblue", "Item" = "firebrick")) +
+  
+  theme_minimal(base_size = 14) +
+  theme(
+    axis.title.x = element_text(size = 14, margin = margin(t = 10)),
+    axis.title.y = element_text(size = 14, margin = margin(r = 10)),
+    axis.text.x = element_text(size = 12),
+    axis.text.y = element_text(size = 12),
+    panel.grid = element_blank(),
+    panel.background = element_rect(fill = "white"),
+    plot.background = element_rect(fill = "white"),
+    axis.line = element_line(color = "black"),
+    axis.ticks = element_line(color = "black")
+  ) +
+  labs(
+    title = "Person-Item Map (Public Health Professional)",
+    x = "Type",
+    y = "Latent Trait (Logit Scale)"
+  ) +
+  coord_flip(clip = "off")  # allows labels outside plot area
+
+ggsave("kap_ph_PersonItem_map.png", width = 10, height = 6, dpi = 300, bg = "white")
+
+
+# This map aligns item difficulties and person abilities on the **x-axis**, 
+# which represents the latent trait scale (logit scale, θ).
+#
+# 🔴 Red dots = Items (e.g., beta s2, beta s5), shown on the "Item" row
+# 🔵 Blue dots = Persons (participants), shown on the "Person" row
+#
+# Interpretation:
+# - Dots further to the right = higher ability (for persons) or harder item (for items)
+# - Dots further to the left = lower ability or easier item
+#
+# - If person and item dots align along the x-axis → well-targeted item
+# - If most persons are to the **right** of items → the test may be **too easy**
+# - If most persons are to the **left** of items → the test may be **too hard**
+
+
+# Proportion correct plot
+# Calculate proportion of correct responses per item
+rf_kap_ph <- response.frequencies(kap_ph_irt)
+prop_correct_ph <- rf_kap_ph[, 2]  # Second column is proportion correct
+
+# Create a plot of proportion correct per question
+item_names_ph <- names(kap_ph_irt)
+df_correct_ph <- data.frame(item = item_names_ph, prop_correct_ph = prop_correct_ph)
+
+ggplot(df_correct_ph, aes(x = reorder(item, -prop_correct_ph), y = prop_correct_ph)) +
+  geom_bar(stat = "identity", fill = "steelblue4") +
+  coord_flip() +
+  labs(title = "Proportion Correct Plot (Public Health Professional)", x = "Item", y = "Proportion Correct") +
+  theme_minimal() +
+  theme(
+    plot.background = element_rect(fill = "white", color = NA),
+    panel.background = element_rect(fill = "white", color = NA),
+    panel.grid = element_blank(),                          
+    axis.line = element_line(color = "black", size = 0.5), 
+    axis.ticks = element_line(color = "black")             
+  )
+
+ggsave("kap_ph_PropCorrect.tif", width = 9, height = 6, dpi = 300, bg = "white") 
+
+
+# This plot shows the proportion of participants who answered each item correctly —
+# a simple and intuitive measure of item difficulty.
+#
+# - Higher bars indicate easier items (more participants got them correct)
+# - Lower bars indicate harder items (fewer participants got them correct)
+
+#_______
+
+# Calculate ULI for Public Health Professionals
+upper_threshold_ph <- quantile(kap_ph$score_total, 0.73)
+lower_threshold_ph <- quantile(kap_ph$score_total, 0.27)
+
+# Identify upper and lower groups
+upper_group_ph <- kap_ph[kap_ph$score_total >= upper_threshold_ph, ]
+lower_group_ph <- kap_ph[kap_ph$score_total <= lower_threshold_ph, ]
+
+
+# Calculate proportions of correct answers for selected items (s1, s3, s4)
+upper_correct_ph <- colMeans(upper_group_ph[, c("s1", "s3", "s4")])
+lower_correct_ph <- colMeans(lower_group_ph[, c("s1", "s3", "s4")])
+
+
+# Compute ULI (Upper-Lower Index)
+uli_ph_normalized <- (upper_correct_ph - lower_correct_ph) / (upper_correct_ph + lower_correct_ph)
+
+uli_ph<-  upper_correct_ph - lower_correct_ph
+
+# Create data.frame for plotting
+data_ph <- data.frame(
+  Item = c("s1", "s3", "s4"),
+  ULI = uli_ph
+)
+
+print(data_ph)
+
+# Plot ULI for Public Health Professionals using ggplot
+ggplot(data_ph, aes(x = Item, y = ULI)) +
+  geom_bar(stat = "identity", fill = "skyblue4", show.legend = FALSE) +  # Set a single color for all bars
+  labs(title = "Upper-Lower Index (Public Health Professionals)",
+       x = "Item", y = "Upper-Lower Index (ULI)") +
+  theme_minimal() +
+  theme(
+    panel.grid = element_blank(), 
+    plot.background = element_rect(fill = "white", color = NA),
+    panel.background = element_rect(fill = "white", color = NA),
+    axis.line = element_line(color = "black")  # X and Y axis lines
+  )
+
+# Save the plot
+ggsave("kap_ph_ULI_plot.png", width = 10, height = 6, dpi = 300)
+
+
+
+
+```
+
+**Medical Professionals**
+```{r, message=FALSE, warning=FALSE}
+
+##Data Preparation & Scoring
+
+kap_mp <- read.csv("C:/Users/abrar/OneDrive - University of Illinois - Urbana/Documents/Abrar Hussain/Ph.D/Ph.D. Papers/As Authors/KAP (Metanalysis)/Qualitative Part/Selected Question Responses for IRT/CSV/medical professionals.csv")
+
+# Rename columns for easier access
+names(kap_mp)[1] <- "Pin"  # Assuming column 1 is the unique ID
+names(kap_mp)[2:11] <- paste0("Q", 1:10)  # Assuming Q1–Q10 
+
+# Scoring logic
+kap_mp$s1 <- ifelse(grepl("Scalp|Neck|Chest|Armpit|Abdomen|Groin|Knee|Calf", kap_mp$Q1, ignore.case = TRUE), 1, 0)
+kap_mp$s2 <- ifelse(grepl("Forested_areas|Prairie_grasslands|Marshlands_swamps", kap_mp$Q2, ignore.case = TRUE), 1, 0)
+kap_mp$s3 <- ifelse(grepl("Fever|chills|Body_aches|joint pain|Rash|Fatigue", kap_mp$Q3, ignore.case = TRUE), 1, 0)
+kap_mp$s4 <- ifelse(grepl("yes", kap_mp$Q4, ignore.case = TRUE), 1, 0)
+kap_mp$s5 <- ifelse(grepl("yes", kap_mp$Q5, ignore.case = TRUE), 1, 0)
+kap_mp$s6 <- ifelse(grepl("Days", kap_mp$Q6, ignore.case = TRUE), 1, 0)
+kap_mp$s7 <- ifelse(grepl("yes", kap_mp$Q7, ignore.case = TRUE), 1, 0)
+kap_mp$s8 <- ifelse(grepl("yes", kap_mp$Q8, ignore.case = TRUE), 1, 0)
+kap_mp$s9 <- ifelse(grepl("yes", kap_mp$Q9, ignore.case = TRUE), 1, 0)
+kap_mp$s10 <- ifelse(grepl("yes", kap_mp$Q10, ignore.case = TRUE), 1, 0)
+
+
+# Total score (summing binary scores)
+kap_mp$score_total <- rowSums(kap_mp[, paste0("s", 1:10)])
+
+#Set directory to save all outputs
+setwd("C:/Users/abrar/OneDrive - University of Illinois - Urbana/Documents/IRT Output")
+
+# Save and export
+save(kap_mp, file = "kap_mp_IRTScored.Rdata")
+write.csv(kap_mp, "kap_mp_IRTScored.csv", row.names = FALSE)
+
+
+#_________
+
+##Getting beta values from Rasch model (simple) to asses the difficulty of questions
+
+#select only cleaned answers for analysis
+kap_mp_irt=dplyr::select(kap_mp,s1,s2,s3,s5,s6,s7,s8,s9,s10)
+
+#s4 has been removed because of its nature (opinion based question)
+
+# Fit Rasch Model (The Rasch model is a type of Item Response Theory (IRT) model — specifically, the 1-Parameter Logistic (1PL) model)
+kap_mp_rm = RM(kap_mp_irt)
+
+#Get and Sort Item Difficulties (ranks questions from easiest (most negative) to hardest (most positive))
+betas_kap_mp <- -coef(kap_mp_rm)
+round(sort(betas_kap_mp), 2)
+
+#_____
+
+# Function to normalize a vector between 0 and 1
+normalize <- function(x) {
+  return((x - min(x)) / (max(x) - min(x)))
+}
+
+# Normalizing
+betas_mp <- -coef(kap_mp_rm)  # Extract Beta values from Rasch model for Medical Professionals
+betas_mp_normalized <- normalize(betas_mp)  # Normalize Beta values
+
+# Create a data frame with normalized Beta values and corresponding questions (s1, s2, ...)
+data_mp <- data.frame(
+  Item = paste0("s", 1:length(betas_mp)),  # Create item labels (s1, s2, s3, ...)
+  Beta = betas_mp,
+  Normalized_Beta = betas_mp_normalized
+)
+
+cat("Normalized Beta values for Medical Professionals:\n")
+print(data_mp)
+
+# Plot Normalized Beta Values for Medical Professionals
+ggplot(data_mp, aes(x = Item, y = Normalized_Beta)) +
+  geom_bar(stat = "identity", fill = "indianred", show.legend = FALSE) +  # Set color for bars
+  labs(title = "Normalized Beta Values (Medical Professionals)",
+       x = "Item", y = "Normalized Beta") +
+  theme_minimal() +
+  theme(
+    panel.grid = element_blank(),  
+    plot.background = element_rect(fill = "white", color = NA),
+    panel.background = element_rect(fill = "white", color = NA),
+    axis.line = element_line(color = "black")  # X and Y axis lines
+  )
+
+# Save the plot
+ggsave("kap_mp_Normalized_Beta_plot.png", width = 10, height = 6, dpi = 300)
+
+
+#_____
+
+## Model Fitting (Rasch, 2PL, 3PL)
+
+# Run Rasch, 2PL, and 3PL models 
+kap_mp_rasch <- rasch(kap_mp_irt)
+kap_mp_2pl <- ltm(kap_mp_irt ~ z1)     # Two-parameter logistic model
+kap_mp_3pl <- tpm(kap_mp_irt)          # Three-parameter logistic model (includes guessing)
+
+
+#_____
+
+##Model Evaluation
+
+# Extract AIC and BIC separately
+aic_values_mp <- c(
+  Rasch = AIC(kap_mp_rasch),
+  `2PL` = AIC(kap_mp_2pl),
+  `3PL` = AIC(kap_mp_3pl)
+)
+
+bic_values_mp <- c(
+  Rasch = BIC(kap_mp_rasch),
+  `2PL` = BIC(kap_mp_2pl),
+  `3PL` = BIC(kap_mp_3pl)
+)
+
+# Print results
+print(aic_values_mp)
+print(bic_values_mp)
+
+# Interpretation:
+# - AIC favors the **2PL model**, suggesting it fits the data best with a good balance of fit and complexity.
+# - BIC favors the **2PL model**, indicating it fits the data best with a good balance of fit and complexity.
+
+
+
+# Compare estimated item difficulty parameters across models
+cor_rasch_2pl_mp <- cor(coef(kap_mp_rasch)[,1], coef(kap_mp_2pl)[,1])
+cor_2pl_3pl_mp    <- cor(coef(kap_mp_2pl)[,1], coef(kap_mp_3pl)[,1])
+cor_rasch_3pl_mp  <- cor(coef(kap_mp_rasch)[,1], coef(kap_mp_3pl)[,1])
+
+cat("Correlation between Rasch and 2PL item difficulties for ph:", round(cor_rasch_2pl_mp, 2), "\n")
+cat("Correlation between 2PL and 3PL item difficulties for ph:", round(cor_2pl_3pl_mp, 2), "\n")
+cat("Correlation between Rasch and 3PL item difficulties for ph:", round(cor_rasch_3pl_mp, 2), "\n")
+
+
+# Correlation Interpretation:
+# Rasch vs 2PL: r = 0.59 => moderate agreement in difficulty
+# 2PL vs 3PL: r = 0.3 => low agreement, especially due to added guessing parameter
+# Rasch vs 3PL: r = 0.3 => very low agreement, model assumptions differ significantly
+#
+# Conclusion: 
+# 2PL model fits best by AIC and provides item discrimination estimates (unlike Rasch).
+# 3PL adds guessing parameter but increases complexity without major AIC/BIC gain.
+# 2PL offers a balance of interpretability and model flexibility for this 10-item dataset.
+
+#_____
+
+##Item Analysis & Visualization
+
+# ICC Plot
+# Prepare ICC data from actual item difficulties
+
+# Extract item parameters from 2PL model
+params_2pl_mp <- coef(kap_mp_2pl)
+
+theta_vals <- seq(-4, 4, length.out = 300)
+icc_df_2pl <- do.call(rbind, lapply(rownames(params_2pl_mp), function(item) {
+  a <- params_2pl_mp[item, "Dscrmn"]  # Discrimination (a)
+  b <- params_2pl_mp[item, "Dffclt"]  # Difficulty (b)
+  p <- 1 / (1 + exp(-a * (theta_vals - b)))  # 2PL ICC formula
+  data.frame(theta = theta_vals, probability = p, item = item)
+}))
+
+
+
+# Plot ICCs using ggplot2
+ggplot(icc_df_2pl, aes(x = theta, y = probability, color = item)) +
+  geom_line(size = 1) +
+  theme_minimal(base_size = 14) +
+  labs(
+    title = "Item Characteristic Curves (Medical Professional)",
+    x = expression(theta ~ "(Latent Trait Ability)"),
+    y = "Probability of Correct Response",
+    color = "Item"
+  ) +
+  theme(
+    panel.grid = element_blank(),                             
+    panel.background = element_rect(fill = "white"),          
+    plot.background = element_rect(fill = "white"),           
+    axis.line = element_line(color = "black", size = 0.5),    
+    axis.ticks = element_line(color = "black")                
+  )
+
+# Save to file (optional)
+ggsave("kap_mp_ICC_plot.png", width = 10, height = 6, dpi = 300)
+
+
+# Item Characteristic Curves (ICCs) plot shows how the probability of a correct response 
+# changes across different levels of latent ability (θ) for each item.
+#
+# - Negative θ values indicate lower ability or knowledge
+# - Positive θ values indicate higher ability
+# - θ = 0 represents average ability level
+
+
+# Person-Item Map (Wright Map) 
+# Prepare data
+pp <- person.parameter(kap_mp_rm)
+person_scores <- coef(pp)
+person_scores <- coef(pp)
+item_difficulties <- betas_kap_mp
+
+# Data frames
+person_df <- data.frame(
+  location = person_scores,
+  type = "Person",
+  label = NA
+)
+
+item_df <- data.frame(
+  location = item_difficulties,
+  type = "Item",
+  label = names(item_difficulties)
+)
+
+# Combine
+map_df_mp <- rbind(person_df, item_df)
+
+# Plot
+ggplot(map_df_mp, aes(x = type, y = location)) +
+  geom_jitter(width = 0.15, size = 2, aes(color = type), show.legend = FALSE) +
+  
+  # Smarter label placement for items using ggrepel
+  ggrepel::geom_text_repel(
+    data = subset(map_df_mp, type == "Item"),
+    aes(label = label),
+    nudge_x = 0.25,
+    size = 4,
+    direction = "y",
+    segment.color = "grey50",
+    max.overlaps = 10
+  ) +
+
+  scale_color_manual(values = c("Person" = "skyblue", "Item" = "firebrick")) +
+  
+  theme_minimal(base_size = 14) +
+  theme(
+    axis.title.x = element_text(size = 14, margin = margin(t = 10)),
+    axis.title.y = element_text(size = 14, margin = margin(r = 10)),
+    axis.text.x = element_text(size = 12),
+    axis.text.y = element_text(size = 12),
+    panel.grid = element_blank(),
+    panel.background = element_rect(fill = "white"),
+    plot.background = element_rect(fill = "white"),
+    axis.line = element_line(color = "black"),
+    axis.ticks = element_line(color = "black")
+  ) +
+  labs(
+    title = "Person-Item Map (Medical Professional)",
+    x = "Type",
+    y = "Latent Trait (Logit Scale)"
+  ) +
+  coord_flip(clip = "off")  # allows labels outside plot area
+
+ggsave("kap_mp_PersonItem_map.png", width = 10, height = 6, dpi = 300, bg = "white")
+
+
+# This map aligns item difficulties and person abilities on the **x-axis**, 
+# which represents the latent trait scale (logit scale, θ).
+#
+# 🔴 Red dots = Items (e.g., beta s2, beta s5), shown on the "Item" row
+# 🔵 Blue dots = Persons (participants), shown on the "Person" row
+#
+# Interpretation:
+# - Dots further to the right = higher ability (for persons) or harder item (for items)
+# - Dots further to the left = lower ability or easier item
+#
+# - If person and item dots align along the x-axis → well-targeted item
+# - If most persons are to the **right** of items → the test may be **too easy**
+# - If most persons are to the **left** of items → the test may be **too hard**
+
+
+# Proportion correct plot
+# Calculate proportion of correct responses per item
+rf_kap_mp <- response.frequencies(kap_mp_irt)
+prop_correct_mp <- rf_kap_mp[, 2]  # Second column is proportion correct
+
+# Create a plot of proportion correct per question
+item_names_mp <- names(kap_mp_irt)
+df_correct_mp <- data.frame(item = item_names_mp, prop_correct_mp = prop_correct_mp)
+
+ggplot(df_correct_mp, aes(x = reorder(item, -prop_correct_mp), y = prop_correct_mp)) +
+  geom_bar(stat = "identity", fill = "steelblue4") +
+  coord_flip() +
+  labs(title = "Proportion Correct Plot (Medical Professional)", x = "Item", y = "Proportion Correct") +
+  theme_minimal() +
+  theme(
+    plot.background = element_rect(fill = "white", color = NA),
+    panel.background = element_rect(fill = "white", color = NA),
+    panel.grid = element_blank(),                          
+    axis.line = element_line(color = "black", size = 0.5), 
+    axis.ticks = element_line(color = "black")             
+  )
+
+ggsave("kap_mp_PropCorrect.tif", width = 9, height = 6, dpi = 300, bg = "white") 
+
+
+# This plot shows the proportion of participants who answered each item correctly —
+# a simple and intuitive measure of item difficulty.
+#
+# - Higher bars indicate easier items (more participants got them correct)
+# - Lower bars indicate harder items (fewer participants got them correct)
+
+
+#______
+
+# Calculate ULI for Medical Professionals
+upper_threshold_mp <- quantile(kap_mp$score_total, 0.73)
+lower_threshold_mp <- quantile(kap_mp$score_total, 0.27)
+
+upper_group_mp <- kap_mp[kap_mp$score_total >= upper_threshold_mp, ]
+lower_group_mp <- kap_mp[kap_mp$score_total <= lower_threshold_mp, ]
+
+upper_correct_mp <- colMeans(upper_group_mp[, c("s1","s2","s3","s5","s6","s7","s8","s9","s10")])
+lower_correct_mp <- colMeans(lower_group_mp[, c("s1","s2","s3","s5","s6","s7","s8","s9","s10")])
+
+uli_mp_normalized <- (upper_correct_mp - lower_correct_mp) / (upper_correct_mp + lower_correct_mp)
+
+uli_mp <-  upper_correct_mp - lower_correct_mp
+
+# Create data.frame for plotting
+data_mp <- data.frame(
+  Item = c("s1","s2","s3","s5","s6","s7","s8","s9","s10"),
+  ULI = uli_mp
+)
+
+print(data_mp)
+
+# Plot ULI for Medical Professionals using ggplot
+ggplot(data_mp, aes(x = Item, y = ULI)) +
+  geom_bar(stat = "identity", fill = "skyblue4", show.legend = FALSE) +  # Set a single color for all bars
+  labs(title = "Upper-Lower Index (Medical Professionals)",
+       x = "Item", y = "Upper-Lower Index (ULI)") +
+  theme_minimal() +
+  theme(
+    panel.grid = element_blank(),  
+    plot.background = element_rect(fill = "white", color = NA),
+    panel.background = element_rect(fill = "white", color = NA),
+    axis.line = element_line(color = "black")  # X and Y axis lines
+  )
+
+# Save the plot
+ggsave("kap_mp_ULI_plot.png", width = 10, height = 6, dpi = 300)
+
+```
+
+
+**Veterinary Professionals**
+```{r, message=FALSE, warning=FALSE}
+##Data Preparation & Scoring
+
+kap_vp <- read.csv("C:/Users/abrar/OneDrive - University of Illinois - Urbana/Documents/Abrar Hussain/Ph.D/Ph.D. Papers/As Authors/KAP (Metanalysis)/Qualitative Part/Selected Question Responses for IRT/CSV/veterinary professionals.csv")
+
+# Rename columns for easier access
+names(kap_vp)[1] <- "Pin"  # Assuming column 1 is the unique ID
+names(kap_vp)[2:13] <- paste0("Q", 1:12)  # Assuming Q1–Q12 
+
+# Scoring logic
+kap_vp$s1 <- ifelse(grepl("Under_the_arms|In_hair|Behind_the_ears|Inside_the_belly_button|Wrists|Back_of_the_knees|Between_the_legs|Shoulders|Around_the_waist", kap_vp$Q1, ignore.case = TRUE), 1, 0)
+kap_vp$s2 <- ifelse(grepl("Grasslands|Woodlands|Swamps|Agricultural_fields", kap_vp$Q2, ignore.case = TRUE), 1, 0)
+kap_vp$s3 <- ifelse(grepl("yes", kap_vp$Q3, ignore.case = TRUE), 1, 0)
+kap_vp$s4 <- ifelse(grepl("Fever|chills|Body_aches|joint pain|Rash|Fatigue", kap_vp$Q4, ignore.case = TRUE), 1, 0)
+kap_vp$s5 <- ifelse(grepl("yes", kap_vp$Q5, ignore.case = TRUE), 1, 0)
+kap_vp$s6 <- ifelse(grepl("Days", kap_vp$Q6, ignore.case = TRUE), 1, 0)
+kap_vp$s7 <- ifelse(grepl("High|Medium|Low", kap_vp$Q7, ignore.case = TRUE), 1, 0)
+kap_vp$s8 <- ifelse(grepl("yes", kap_vp$Q8, ignore.case = TRUE), 1, 0)
+kap_vp$s9 <- ifelse(grepl("yes", kap_vp$Q9, ignore.case = TRUE), 1, 0)
+kap_vp$s10 <- ifelse(grepl("yes", kap_vp$Q10, ignore.case = TRUE), 1, 0)
+kap_vp$s11 <- ifelse(grepl("yes", kap_vp$Q11, ignore.case = TRUE), 1, 0)
+kap_vp$s12 <- ifelse(grepl("Flyers|Verbally|Website", kap_vp$Q12, ignore.case = TRUE), 1, 0)
+
+
+# Total score (summing binary scores)
+kap_vp$score_total <- rowSums(kap_vp[, paste0("s", 1:12)])
+
+#Set directory to save all outputs
+setwd("C:/Users/abrar/OneDrive - University of Illinois - Urbana/Documents/IRT Output")
+
+# Save and export
+save(kap_vp, file = "kap_vp_IRTScored.Rdata")
+write.csv(kap_vp, "kap_vp_IRTScored.csv", row.names = FALSE)
+
+
+#_________
+
+##Getting beta values from Rasch model (simple) to asses the difficulty of questions
+
+#select only cleaned answers for analysis
+kap_vp_irt=dplyr::select(kap_vp,s1,s2,s3,s4,s6,s7,s8,s9,s10,s11)
+
+#s4 has been removed because of its nature (opinion based question)
+
+# Fit Rasch Model (The Rasch model is a type of Item Response Theory (IRT) model — specifically, the 1-Parameter Logistic (1PL) model)
+kap_vp_rm = RM(kap_vp_irt)
+
+#Get and Sort Item Difficulties (ranks questions from easiest (most negative) to hardest (most positive))
+betas_kap_vp <- -coef(kap_vp_rm)
+round(sort(betas_kap_vp), 2)
+
+#_____
+
+# Function to normalize a vector between 0 and 1
+normalize <- function(x) {
+  return((x - min(x)) / (max(x) - min(x)))
+}
+
+# Normalizing
+betas_vp <- -coef(kap_vp_rm)  # Extract Beta values from Rasch model for Veterinary Professionals
+betas_vp_normalized <- normalize(betas_vp)  # Normalize Beta values
+
+# Create a data frame with normalized Beta values and corresponding questions (s1, s2, ...)
+data_vp <- data.frame(
+  Item = paste0("s", 1:length(betas_vp)),  # Create item labels (s1, s2, s3, ...)
+  Beta = betas_vp,
+  Normalized_Beta = betas_vp_normalized
+)
+
+cat("Normalized Beta values for Veterinary Professionals:\n")
+print(data_vp)
+
+
+# Plot Normalized Beta Values for Veterinary Professionals
+ggplot(data_vp, aes(x = Item, y = Normalized_Beta)) +
+  geom_bar(stat = "identity", fill = "indianred", show.legend = FALSE) +  # Set color for bars
+  labs(title = "Normalized Beta Values (Veterinary Professionals)",
+       x = "Item", y = "Normalized Beta") +
+  theme_minimal() +
+  theme(
+    panel.grid = element_blank(), 
+    plot.background = element_rect(fill = "white", color = NA),
+    panel.background = element_rect(fill = "white", color = NA),
+    axis.line = element_line(color = "black")  # X and Y axis lines
+  )
+
+# Save the plot
+ggsave("kap_vp_Normalized_Beta_plot.png", width = 10, height = 6, dpi = 300)
+
+
+#_____
+
+## Model Fitting (Rasch, 2PL, 3PL)
+
+# Run Rasch, 2PL, and 3PL models 
+kap_vp_rasch <- rasch(kap_vp_irt)
+kap_vp_2pl <- ltm(kap_vp_irt ~ z1)     # Two-parameter logistic model
+kap_vp_3pl <- tpm(kap_vp_irt)          # Three-parameter logistic model (includes guessing)
+
+
+#_____
+
+##Model Evaluation
+
+# Extract AIC and BIC separately
+aic_values_vp <- c(
+  Rasch = AIC(kap_vp_rasch),
+  `2PL` = AIC(kap_vp_2pl),
+  `3PL` = AIC(kap_vp_3pl)
+)
+
+bic_values_vp <- c(
+  Rasch = BIC(kap_vp_rasch),
+  `2PL` = BIC(kap_vp_2pl),
+  `3PL` = BIC(kap_vp_3pl)
+)
+
+# Print results
+print(aic_values_vp)
+print(bic_values_vp)
+
+# Interpretation:
+# - AIC favors the **2PL model**, suggesting it fits the data best with a good balance of fit and complexity.
+# - BIC favors the **2PL model**, indicating it fits the data best with a good balance of fit and complexity.
+
+
+
+# Compare estimated item difficulty parameters across models
+cor_rasch_2pl_vp <- cor(coef(kap_vp_rasch)[,1], coef(kap_vp_2pl)[,1])
+cor_2pl_3pl_vp   <- cor(coef(kap_vp_2pl)[,1], coef(kap_vp_3pl)[,1])
+cor_rasch_3pl_vp  <- cor(coef(kap_vp_rasch)[,1], coef(kap_vp_3pl)[,1])
+
+cat("Correlation between Rasch and 2PL item difficulties for ph:", round(cor_rasch_2pl_vp, 2), "\n")
+cat("Correlation between 2PL and 3PL item difficulties for ph:", round(cor_2pl_3pl_vp, 2), "\n")
+cat("Correlation between Rasch and 3PL item difficulties for ph:", round(cor_rasch_3pl_vp, 2), "\n")
+
+
+# Correlation of Item Difficulties:
+# Rasch vs 2PL: r = 0.11 → Weak agreement, Rasch oversimplifies discrimination
+# 2PL vs 3PL: r = -0.33 → Inverse relationship suggests unstable parameter estimation with 3PL
+# Rasch vs 3PL: r = 0.10 → Also weak, further confirming the divergence
+
+# Conclusion:
+# The 2PL model offers the best fit and most stable item estimates.
+# The 3PL model introduces guessing parameter complexity, but does not improve model fit enough to justify its use.
+
+#_____
+
+##Item Analysis & Visualization
+
+# ICC Plot
+# Prepare ICC data from actual item difficulties
+
+# Extract item parameters from 2PL model
+params_2pl_vp <- coef(kap_vp_2pl)
+
+theta_vals <- seq(-4, 4, length.out = 300)
+icc_df_2pl <- do.call(rbind, lapply(rownames(params_2pl_vp), function(item) {
+  a <- params_2pl_vp[item, "Dscrmn"]  # Discrimination (a)
+  b <- params_2pl_vp[item, "Dffclt"]  # Difficulty (b)
+  p <- 1 / (1 + exp(-a * (theta_vals - b)))  # 2PL ICC formula
+  data.frame(theta = theta_vals, probability = p, item = item)
+}))
+
+
+
+# Plot ICCs using ggplot2
+ggplot(icc_df_2pl, aes(x = theta, y = probability, color = item)) +
+  geom_line(size = 1) +
+  theme_minimal(base_size = 14) +
+  labs(
+    title = "Item Characteristic Curves (Veterinary Professional)",
+    x = expression(theta ~ "(Latent Trait Ability)"),
+    y = "Probability of Correct Response",
+    color = "Item"
+  ) +
+  theme(
+    panel.grid = element_blank(),                             
+    panel.background = element_rect(fill = "white"),          
+    plot.background = element_rect(fill = "white"),           
+    axis.line = element_line(color = "black", size = 0.5),    
+    axis.ticks = element_line(color = "black")                
+  )
+
+# Save to file (optional)
+ggsave("kap_vp_ICC_plot.png", width = 10, height = 6, dpi = 300)
+
+
+# Item Characteristic Curves (ICCs) plot shows how the probability of a correct response 
+# changes across different levels of latent ability (θ) for each item.
+#
+# - Negative θ values indicate lower ability or knowledge
+# - Positive θ values indicate higher ability
+# - θ = 0 represents average ability level
+
+
+# Person-Item Map (Wright Map) 
+# Prepare data
+pp <- person.parameter(kap_vp_rm)
+person_scores <- coef(pp)
+person_scores <- coef(pp)
+item_difficulties <- betas_kap_vp
+
+# Data frames
+person_df <- data.frame(
+  location = person_scores,
+  type = "Person",
+  label = NA
+)
+
+item_df <- data.frame(
+  location = item_difficulties,
+  type = "Item",
+  label = names(item_difficulties)
+)
+
+# Combine
+map_df_vp <- rbind(person_df, item_df)
+
+# Plot
+ggplot(map_df_vp, aes(x = type, y = location)) +
+  geom_jitter(width = 0.15, size = 2, aes(color = type), show.legend = FALSE) +
+  
+  # Smarter label placement for items using ggrepel
+  ggrepel::geom_text_repel(
+    data = subset(map_df_vp, type == "Item"),
+    aes(label = label),
+    nudge_x = 0.25,
+    size = 4,
+    direction = "y",
+    segment.color = "grey50",
+    max.overlaps = 10
+  ) +
+
+  scale_color_manual(values = c("Person" = "skyblue", "Item" = "firebrick")) +
+  
+  theme_minimal(base_size = 14) +
+  theme(
+    axis.title.x = element_text(size = 14, margin = margin(t = 10)),
+    axis.title.y = element_text(size = 14, margin = margin(r = 10)),
+    axis.text.x = element_text(size = 12),
+    axis.text.y = element_text(size = 12),
+    panel.grid = element_blank(),
+    panel.background = element_rect(fill = "white"),
+    plot.background = element_rect(fill = "white"),
+    axis.line = element_line(color = "black"),
+    axis.ticks = element_line(color = "black")
+  ) +
+  labs(
+    title = "Person-Item Map (Veterinary Professional)",
+    x = "Type",
+    y = "Latent Trait (Logit Scale)"
+  ) +
+  coord_flip(clip = "off")  # allows labels outside plot area
+
+ggsave("kap_vp_PersonItem_map.png", width = 10, height = 6, dpi = 300, bg = "white")
+
+
+# This map aligns item difficulties and person abilities on the **x-axis**, 
+# which represents the latent trait scale (logit scale, θ).
+#
+# 🔴 Red dots = Items (e.g., beta s2, beta s5), shown on the "Item" row
+# 🔵 Blue dots = Persons (participants), shown on the "Person" row
+#
+# Interpretation:
+# - Dots further to the right = higher ability (for persons) or harder item (for items)
+# - Dots further to the left = lower ability or easier item
+#
+# - If person and item dots align along the x-axis → well-targeted item
+# - If most persons are to the **right** of items → the test may be **too easy**
+# - If most persons are to the **left** of items → the test may be **too hard**
+
+
+# Proportion correct plot
+# Calculate proportion of correct responses per item
+rf_kap_vp <- response.frequencies(kap_vp_irt)
+prop_correct_vp <- rf_kap_vp[, 2]  # Second column is proportion correct
+
+# Create a plot of proportion correct per question
+item_names_vp <- names(kap_vp_irt)
+df_correct_vp <- data.frame(item = item_names_vp, prop_correct_vp = prop_correct_vp)
+
+ggplot(df_correct_vp, aes(x = reorder(item, -prop_correct_vp), y = prop_correct_vp)) +
+  geom_bar(stat = "identity", fill = "steelblue4") +
+  coord_flip() +
+  labs(title = "Proportion Correct Plot (Veterinary Professional)", x = "Item", y = "Proportion Correct") +
+  theme_minimal() +
+  theme(
+    plot.background = element_rect(fill = "white", color = NA),
+    panel.background = element_rect(fill = "white", color = NA),
+    panel.grid = element_blank(),                          
+    axis.line = element_line(color = "black", size = 0.5), 
+    axis.ticks = element_line(color = "black")             
+  )
+
+ggsave("kap_vp_PropCorrect.tif", width = 9, height = 6, dpi = 300, bg = "white") 
+
+
+# This plot shows the proportion of participants who answered each item correctly —
+# a simple and intuitive measure of item difficulty.
+#
+# - Higher bars indicate easier items (more participants got them correct)
+# - Lower bars indicate harder items (fewer participants got them correct)
+
+#_______
+
+# Calculate ULI for Veterinary Professionals
+upper_threshold_vp <- quantile(kap_vp$score_total, 0.73)
+lower_threshold_vp <- quantile(kap_vp$score_total, 0.27)
+
+upper_group_vp <- kap_vp[kap_vp$score_total >= upper_threshold_vp, ]
+lower_group_vp <- kap_vp[kap_vp$score_total <= lower_threshold_vp, ]
+
+upper_correct_vp <- colMeans(upper_group_vp[, c("s1","s2","s3","s4","s6","s7","s8","s9","s10","s11")])
+lower_correct_vp <- colMeans(lower_group_vp[, c("s1","s2","s3","s4","s6","s7","s8","s9","s10","s11")])
+
+
+uli_vp_normalized <- (upper_correct_vp - lower_correct_vp) / (upper_correct_vp + lower_correct_vp)
+
+uli_vp <-  upper_correct_vp - lower_correct_vp
+
+
+# Create data.frame for plotting
+data_vp <- data.frame(
+  Item = c("s1","s2","s3","s4","s6","s7","s8","s9","s10","s11"),
+  ULI = uli_vp
+)
+
+print(data_vp)
+
+# Plot ULI for Veterinary Professionals using ggplot
+ggplot(data_vp, aes(x = Item, y = ULI)) +
+  geom_bar(stat = "identity", fill = "skyblue4", show.legend = FALSE) +  # Set a single color for all bars
+  labs(title = "Upper-Lower Index (Veterinary Professionals)",
+       x = "Item", y = "Upper-Lower Index (ULI)") +
+  theme_minimal() +
+  theme(
+    panel.grid = element_blank(), 
+    plot.background = element_rect(fill = "white", color = NA),
+    panel.background = element_rect(fill = "white", color = NA),
+    axis.line = element_line(color = "black")  # X and Y axis lines
+  )
+
+# Save the plot
+ggsave("kap_vp_ULI_plot.png", width = 10, height = 6, dpi = 300)
+
+
+```
+
+**Extension Workers**
+```{r, message=FALSE, warning=FALSE}
+##Data Preparation & Scoring
+
+kap_ew <- read.csv("C:/Users/abrar/OneDrive - University of Illinois - Urbana/Documents/Abrar Hussain/Ph.D/Ph.D. Papers/As Authors/KAP (Metanalysis)/Qualitative Part/Selected Question Responses for IRT/CSV/extension workers.csv")
+
+# Rename columns for easier access
+names(kap_ew)[1] <- "Pin"  # Assuming column 1 is the unique ID
+names(kap_ew)[2:31] <- paste0("Q", 1:30)  # Assuming Q1–Q30 
+
+# Scoring logic
+kap_ew$s1 <- ifelse(grepl("A lot|Some", kap_ew$Q1, ignore.case = TRUE), 1, 0)
+kap_ew$s2 <- ifelse(grepl("Yes|Maybe", kap_ew$Q2, ignore.case = TRUE), 1, 0)
+kap_ew$s3 <- ifelse(grepl("Yes|Maybe", kap_ew$Q3, ignore.case = TRUE), 1, 0)
+kap_ew$s4 <- ifelse(grepl("Yes|Maybe", kap_ew$Q4, ignore.case = TRUE), 1, 0)
+kap_ew$s5 <- ifelse(grepl("Yes|Maybe", kap_ew$Q5, ignore.case = TRUE), 1, 0)
+kap_ew$s6 <- ifelse(grepl("Yes|Maybe", kap_ew$Q6, ignore.case = TRUE), 1, 0)
+kap_ew$s7 <- ifelse(grepl("Yes|Maybe", kap_ew$Q7, ignore.case = TRUE), 1, 0)
+kap_ew$s8 <- ifelse(grepl("Lyme disease|Rocky Mountain Spotted fever|Tularemia|RMSF|Alpha Gal|Alpha Gal Syndrome|Ehrlichiosis|Anaplasmosis|Babesiosis", kap_ew$Q8, ignore.case = TRUE), 1, 0)
+kap_ew$s9 <- ifelse(grepl("Hair|Head|Scalp|Underarms|Groin|Back|Toes|Elbows|Chest-Shoulder|Back of the knees|Inside the belly button|Wrists|Around the waist|Behind the ears", kap_ew$Q9, ignore.case = TRUE), 1, 0)
+kap_ew$s10 <- ifelse(grepl("From medical professional|From extension|From the veterinarian|All", kap_ew$Q10, ignore.case = TRUE), 1, 0)
+kap_ew$s11 <- ifelse(grepl("Spring months|Summer months|Autumn months|Winter months|Throughout the year", kap_ew$Q11, ignore.case = TRUE), 1, 0)
+kap_ew$s12 <- ifelse(grepl("White-tailed deer|White-footed mouse|Cats and Dogs|Humans|Birds|Livestock animals", kap_ew$Q12, ignore.case = TRUE), 1, 0)
+kap_ew$s13 <- ifelse(grepl("Fever and chills|Rash|lesions, ulcers, or other skin reactions|Headache|stiff neck|Difficulty breathing|Allergies|Pain in the joints|muscle pains|Fatigue|Other", kap_ew$Q13, ignore.case = TRUE), 1, 0)
+kap_ew$s14 <- ifelse(grepl("Through the bite of an infected tick|Through consumption of infected animal meat or animal byproducts", kap_ew$Q14, ignore.case = TRUE), 1, 0)
+kap_ew$s15 <- ifelse(grepl("Yes|Maybe", kap_ew$Q15, ignore.case = TRUE), 1, 0)
+kap_ew$s16 <- ifelse(grepl("Yes|Maybe", kap_ew$Q16, ignore.case = TRUE), 1, 0)
+kap_ew$s17 <- ifelse(grepl("Yes|Maybe", kap_ew$Q17, ignore.case = TRUE), 1, 0)
+kap_ew$s18 <- ifelse(grepl("Yes|Maybe", kap_ew$Q18, ignore.case = TRUE), 1, 0)
+kap_ew$s19 <- ifelse(grepl("Hiking|Gardening, farming and various agricultural activities|Playing with pets outside|hunting|Walking outdoors|Mushroom hunting|Other", kap_ew$Q19, ignore.case = TRUE), 1, 0)
+kap_ew$s20 <- ifelse(grepl("Very concerned|concerned|mildly concerned", kap_ew$Q20, ignore.case = TRUE), 1, 0)
+kap_ew$s21 <- ifelse(grepl("Yes|Maybe", kap_ew$Q21, ignore.case = TRUE), 1, 0)
+kap_ew$s22 <- ifelse(grepl("Yes|Maybe", kap_ew$Q22, ignore.case = TRUE), 1, 0)
+kap_ew$s23 <- ifelse(grepl("Yes|Maybe", kap_ew$Q23, ignore.case = TRUE), 1, 0)
+kap_ew$s24 <- ifelse(grepl("Yes|Maybe", kap_ew$Q24, ignore.case = TRUE), 1, 0)
+kap_ew$s25 <- ifelse(grepl("Use tick repellant on self|Wear light-colored clothing|Wear hat/cap|Wear long-sleeved shirts and long pants|Tuck pants into boots|Wear permethrin-treated clothing|Other|Check yourself|Avoiding areas", kap_ew$Q25, ignore.case = TRUE), 1, 0)
+kap_ew$s26 <- ifelse(grepl("Consult healthcare professional|Flush the tick|Use an object to remove ticks|Use alcohol|Take a photo of the tick", kap_ew$Q26, ignore.case = TRUE), 1, 0)
+kap_ew$s27 <- ifelse(grepl("Consult healthcare professional|Flush the tick|Use an object to remove ticks|Use alcohol|Take a phot|Freeze the tick|Store in container with alcohol|Throw away tick|Flush tick in toilet", kap_ew$Q27, ignore.case = TRUE), 1, 0)
+kap_ew$s28 <- ifelse(grepl("^\\s*\\d+\\s*$", kap_ew$Q28), 1, 0)
+kap_ew$s29 <- ifelse(grepl("Yes|Maybe|No", kap_ew$Q29, ignore.case = TRUE), 1, 0)
+kap_ew$s30 <- ifelse(grepl("Yes|Maybe|No", kap_ew$Q30, ignore.case = TRUE), 1, 0)
+
+
+# Total score (summing binary scores)
+kap_ew$score_total <- rowSums(kap_ew[, paste0("s", 1:30)])
+
+#Set directory to save all outputs
+setwd("C:/Users/abrar/OneDrive - University of Illinois - Urbana/Documents/IRT Output")
+
+# Save and export
+save(kap_ew, file = "kap_ew_IRTScored.Rdata")
+write.csv(kap_ew, "kap_ew_IRTScored.csv", row.names = FALSE)
+
+
+#_________
+
+##Getting beta values from Rasch model (simple) to asses the difficulty of questions
+
+#select only cleaned answers for analysis
+kap_ew_irt=dplyr::select(kap_ew,s1,s2,s3,s4,s5,s6,s7,s8,s9,s11,s12,s13,s14,s16,s17,s18,s19,s20,s23,s24,s25,s26,s27)
+
+#s15,s20,s21,s28,s29,s30 removed because of the nature of questions (opinion based)
+
+# Fit Rasch Model (The Rasch model is a type of Item Response Theory (IRT) model — specifically, the 1-Parameter Logistic (1PL) model)
+kap_ew_rm = RM(kap_ew_irt)
+
+#Get and Sort Item Difficulties (ranks questions from easiest (most negative) to hardest (most positive))
+betas_kap_ew <- -coef(kap_ew_rm)
+round(sort(betas_kap_ew), 2)
+
+print(betas_kap_ew)
+
+#s8,s9,s14,s19,s29,s30 has been removed due to Lack of Response Variability
+
+#_____
+
+# Function to normalize a vector between 0 and 1
+normalize <- function(x) {
+  return((x - min(x)) / (max(x) - min(x)))
+}
+
+# Normalizing
+betas_ew <- -coef(kap_ew_rm)  # Extract Beta values from Rasch model for Extension Workers
+betas_ew_normalized <- normalize(betas_ew)  # Normalize Beta values
+
+# Create a data frame with normalized Beta values and corresponding questions (s1, s2, ...)
+data_ew <- data.frame(
+  Item = paste0("s", 1:length(betas_ew)),  # Create item labels (s1, s2, s3, ...)
+  Beta = betas_ew,
+  Normalized_Beta = betas_ew_normalized
+)
+
+cat("Normalized Beta values for Extension Workers:\n")
+print(data_ew)
+
+
+# Plot Normalized Beta Values for Extension Workers
+ggplot(data_ew, aes(x = Item, y = Normalized_Beta)) +
+  geom_bar(stat = "identity", fill = "indianred", show.legend = FALSE) +  # Set color for bars
+  labs(title = "Normalized Beta Values (Extension Workers)",
+       x = "Item", y = "Normalized Beta") +
+  theme_minimal() +
+  theme(
+    panel.grid = element_blank(),  
+    plot.background = element_rect(fill = "white", color = NA),
+    panel.background = element_rect(fill = "white", color = NA),
+    axis.line = element_line(color = "black")  # X and Y axis lines
+  )
+
+# Save the plot
+ggsave("kap_ew_Normalized_Beta_plot.png", width = 10, height = 6, dpi = 300)
+
+
+#_____
+
+## Model Fitting (Rasch, 2PL, 3PL)
+
+# Run Rasch, 2PL, and 3PL models 
+kap_ew_rasch <- rasch(kap_ew_irt)
+kap_ew_2pl <- ltm(kap_ew_irt ~ z1)     # Two-parameter logistic model
+kap_ew_3pl <- tpm(kap_ew_irt)          # Three-parameter logistic model (includes guessing)
+
+
+#_____
+
+##Model Evaluation
+
+# Extract AIC and BIC separately
+aic_values_ew <- c(
+  Rasch = AIC(kap_ew_rasch),
+  `2PL` = AIC(kap_ew_2pl),
+  `3PL` = AIC(kap_ew_3pl)
+)
+
+bic_values_ew <- c(
+  Rasch = BIC(kap_ew_rasch),
+  `2PL` = BIC(kap_ew_2pl),
+  `3PL` = BIC(kap_ew_3pl)
+)
+
+# Print results
+print(aic_values_ew)
+print(bic_values_ew)
+
+# Interpretation:
+# - AIC favors the **2PL model**, suggesting it fits the data best with a good balance of fit and complexity.
+# - BIC favors the **2PL model**, indicating it fits the data best with a good balance of fit and complexity.
+
+
+# Compare estimated item difficulty parameters across models
+cor_rasch_2pl_ew <- cor(coef(kap_ew_rasch)[,1], coef(kap_ew_2pl)[,1])
+cor_2pl_3pl_ew   <- cor(coef(kap_ew_2pl)[,1], coef(kap_ew_3pl)[,1])
+cor_rasch_3pl_ew  <- cor(coef(kap_ew_rasch)[,1], coef(kap_ew_3pl)[,1])
+
+cat("Correlation between Rasch and 2PL item difficulties for ph:", round(cor_rasch_2pl_ew, 2), "\n")
+cat("Correlation between 2PL and 3PL item difficulties for ph:", round(cor_2pl_3pl_ew, 2), "\n")
+cat("Correlation between Rasch and 3PL item difficulties for ph:", round(cor_rasch_3pl_ew, 2), "\n")
+
+
+# The strong negative correlation (r = -0.98) between Rasch and 2PL item difficulties 
+# suggests a reversal in how the models rank item difficulty. This is likely due to
+# the Rasch model’s equal discrimination assumption not holding for this dataset.
+
+# The weak correlation between 2PL and 3PL (r = -0.2) further suggests that adding 
+# a guessing parameter (as in 3PL) leads to unstable estimates and unnecessary complexity.
+
+# Therefore, the 2PL model is better for interpretation and further analysis.
+
+#_____
+
+##Item Analysis & Visualization
+
+# ICC Plot
+# Prepare ICC data from actual item difficulties
+
+# Extract item parameters from 2PL model
+params_2pl_ew <- coef(kap_ew_2pl)
+
+theta_vals <- seq(-4, 4, length.out = 300)
+icc_df_2pl <- do.call(rbind, lapply(rownames(params_2pl_ew), function(item) {
+  a <- params_2pl_ew[item, "Dscrmn"]  # Discrimination (a)
+  b <- params_2pl_ew[item, "Dffclt"]  # Difficulty (b)
+  p <- 1 / (1 + exp(-a * (theta_vals - b)))  # 2PL ICC formula
+  data.frame(theta = theta_vals, probability = p, item = item)
+}))
+
+
+
+# Plot ICCs using ggplot2
+ggplot(icc_df_2pl, aes(x = theta, y = probability, color = item)) +
+  geom_line(size = 1) +
+  theme_minimal(base_size = 14) +
+  labs(
+    title = "Item Characteristic Curves (Extension Workers)",
+    x = expression(theta ~ "(Latent Trait Ability)"),
+    y = "Probability of Correct Response",
+    color = "Item"
+  ) +
+  theme(
+    panel.grid = element_blank(),                             
+    panel.background = element_rect(fill = "white"),          
+    plot.background = element_rect(fill = "white"),           
+    axis.line = element_line(color = "black", size = 0.5),    
+    axis.ticks = element_line(color = "black")                
+  )
+
+# Save to file (optional)
+ggsave("kap_ew_ICC_plot.png", width = 10, height = 6, dpi = 300)
+
+
+# Item Characteristic Curves (ICCs) plot shows how the probability of a correct response 
+# changes across different levels of latent ability (θ) for each item.
+#
+# - Negative θ values indicate lower ability or knowledge
+# - Positive θ values indicate higher ability
+# - θ = 0 represents average ability level
+
+
+# Person-Item Map (Wright Map) 
+# Prepare data
+pp <- person.parameter(kap_ew_rm)
+person_scores <- coef(pp)
+person_scores <- coef(pp)
+item_difficulties <- betas_kap_ew
+
+# Data frames
+person_df <- data.frame(
+  location = person_scores,
+  type = "Person",
+  label = NA
+)
+
+item_df <- data.frame(
+  location = item_difficulties,
+  type = "Item",
+  label = names(item_difficulties)
+)
+
+# Combine
+map_df_ew <- rbind(person_df, item_df)
+
+# Plot
+ggplot(map_df_ew, aes(x = type, y = location)) +
+  geom_jitter(width = 0.15, size = 2, aes(color = type), show.legend = FALSE) +
+  
+  # Smarter label placement for items using ggrepel
+  ggrepel::geom_text_repel(
+    data = subset(map_df_ew, type == "Item"),
+    aes(label = label),
+    nudge_x = 0.25,
+    size = 4,
+    direction = "y",
+    segment.color = "grey50",
+    max.overlaps = 10
+  ) +
+
+  scale_color_manual(values = c("Person" = "skyblue", "Item" = "firebrick")) +
+  
+  theme_minimal(base_size = 14) +
+  theme(
+    axis.title.x = element_text(size = 14, margin = margin(t = 10)),
+    axis.title.y = element_text(size = 14, margin = margin(r = 10)),
+    axis.text.x = element_text(size = 12),
+    axis.text.y = element_text(size = 12),
+    panel.grid = element_blank(),
+    panel.background = element_rect(fill = "white"),
+    plot.background = element_rect(fill = "white"),
+    axis.line = element_line(color = "black"),
+    axis.ticks = element_line(color = "black")
+  ) +
+  labs(
+    title = "Person-Item Map (Extension Workers)",
+    x = "Type",
+    y = "Latent Trait (Logit Scale)"
+  ) +
+  coord_flip(clip = "off")  # allows labels outside plot area
+
+ggsave("kap_ew_PersonItem_map.png", width = 10, height = 6, dpi = 300, bg = "white")
+
+
+# This map aligns item difficulties and person abilities on the **x-axis**, 
+# which represents the latent trait scale (logit scale, θ).
+#
+# 🔴 Red dots = Items (e.g., beta s2, beta s5), shown on the "Item" row
+# 🔵 Blue dots = Persons (participants), shown on the "Person" row
+#
+# Interpretation:
+# - Dots further to the right = higher ability (for persons) or harder item (for items)
+# - Dots further to the left = lower ability or easier item
+#
+# - If person and item dots align along the x-axis → well-targeted item
+# - If most persons are to the **right** of items → the test may be **too easy**
+# - If most persons are to the **left** of items → the test may be **too hard**
+
+
+# Proportion correct plot
+# Calculate proportion of correct responses per item
+rf_kap_ew <- response.frequencies(kap_ew_irt)
+prop_correct_ew <- rf_kap_ew[, 2]  # Second column is proportion correct
+
+# Create a plot of proportion correct per question
+item_names_ew <- names(kap_ew_irt)
+df_correct_ew <- data.frame(item = item_names_ew, prop_correct_ew = prop_correct_ew)
+
+ggplot(df_correct_ew, aes(x = reorder(item, -prop_correct_ew), y = prop_correct_ew)) +
+  geom_bar(stat = "identity", fill = "steelblue4") +
+  coord_flip() +
+  labs(title = "Proportion Correct Plot (Extension Workers)", x = "Item", y = "Proportion Correct") +
+  theme_minimal() +
+  theme(
+    plot.background = element_rect(fill = "white", color = NA),
+    panel.background = element_rect(fill = "white", color = NA),
+    panel.grid = element_blank(),                          
+    axis.line = element_line(color = "black", size = 0.5), 
+    axis.ticks = element_line(color = "black")             
+  )
+
+ggsave("kap_ew_PropCorrect.tif", width = 9, height = 6, dpi = 300, bg = "white") 
+
+# This plot shows the proportion of participants who answered each item correctly —
+# a simple and intuitive measure of item difficulty.
+#
+# - Higher bars indicate easier items (more participants got them correct)
+# - Lower bars indicate harder items (fewer participants got them correct)
+
+
+#_______
+
+
+# Calculate ULI for Extension Workers
+upper_threshold_ew <- quantile(kap_ew$score_total, 0.73)
+lower_threshold_ew <- quantile(kap_ew$score_total, 0.27)
+
+upper_group_ew <- kap_ew[kap_ew$score_total >= upper_threshold_ew, ]
+lower_group_ew <- kap_ew[kap_ew$score_total <= lower_threshold_ew, ]
+
+upper_correct_ew <- colMeans(upper_group_ew[,c("s1","s2","s3","s4","s5","s6","s7","s8","s9","s11","s12","s13","s14","s16","s17","s18","s19","s20","s23","s24","s25","s26","s27")])
+lower_correct_ew <- colMeans(lower_group_ew[,c("s1","s2","s3","s4","s5","s6","s7","s8","s9","s11","s12","s13","s14","s16","s17","s18","s19","s20","s23","s24","s25","s26","s27")])
+
+uli_ew_normailized <- (upper_correct_ew - lower_correct_ew) / (upper_correct_ew + lower_correct_ew)
+
+uli_ew <-  upper_correct_ew - lower_correct_ew
+
+# Create data.frame for plotting
+data_ew <- data.frame(
+  Item = c("s1","s2","s3","s4","s5","s6","s7","s8","s9","s11","s12","s13","s14","s16","s17","s18","s19","s20","s23","s24","s25","s26","s27"),
+  ULI = uli_ew
+)
+
+print(data_ew)
+
+# Plot ULI for Extension Workers using ggplot
+ggplot(data_ew, aes(x = Item, y = ULI)) +
+  geom_bar(stat = "identity", fill = "skyblue4", show.legend = FALSE) +  # Set a single color for all bars
+  labs(title = "Upper-Lower Index (Extension Workers)",
+       x = "Item", y = "Upper-Lower Index (ULI)") +
+  theme_minimal() +
+  theme(
+    panel.grid = element_blank(),  
+    plot.background = element_rect(fill = "white", color = NA),
+    panel.background = element_rect(fill = "white", color = NA),
+    axis.line = element_line(color = "black")  # X and Y axis lines
+  )
+
+# Save the plot
+ggsave("kap_ew_ULI_plot.png", width = 10, height = 6, dpi = 300)
+
+
+```
+
+
+**Farmers**
+```{r, message=FALSE, warning=FALSE}
+##Data Preparation & Scoring
+
+kap_f <- read.csv("C:/Users/abrar/OneDrive - University of Illinois - Urbana/Documents/Abrar Hussain/Ph.D/Ph.D. Papers/As Authors/KAP (Metanalysis)/Qualitative Part/Selected Question Responses for IRT/CSV/farmers.csv")
+
+# Rename columns for easier access
+names(kap_f)[1] <- "Pin"  # Assuming column 1 is the unique ID
+names(kap_f)[2:35] <- paste0("Q", 1:34)  # Assuming Q1–Q34 
+
+# Scoring logic
+kap_f$s1 <- ifelse(grepl("Moderate|High", kap_f$Q1, ignore.case = TRUE), 1, 0)
+kap_f$s2 <- ifelse(grepl("Yes|Maybe", kap_f$Q2, ignore.case = TRUE), 1, 0)
+kap_f$s3 <- ifelse(grepl("Yes|Maybe", kap_f$Q3, ignore.case = TRUE), 1, 0)
+kap_f$s4 <- ifelse(grepl("Yes|Maybe", kap_f$Q4, ignore.case = TRUE), 1, 0)
+kap_f$s5 <- ifelse(grepl("Yes|Maybe", kap_f$Q5, ignore.case = TRUE), 1, 0)
+kap_f$s6 <- ifelse(grepl("Yes|Maybe", kap_f$Q6, ignore.case = TRUE), 1, 0)
+kap_f$s7 <- ifelse(grepl("Yes|Maybe", kap_f$Q7, ignore.case = TRUE), 1, 0)
+kap_f$s8 <- ifelse(grepl("Yes|Maybe", kap_f$Q8, ignore.case = TRUE), 1, 0)
+kap_f$s9 <- ifelse(grepl("Lyme disease|Rocky Mountain Spotted fever|Tularemia|RMSF|Alpha Gal|Alpha Gal Syndrome|Ehrlichiosis|Anaplasmosis|Babesiosis", kap_f$Q9, ignore.case = TRUE), 1, 0)
+kap_f$s10 <- ifelse(grepl("Hair|Head|Scalp|Underarms|Groin|Back|Toes|Elbows|Chest-Shoulder|Back of the knees|Inside the belly button|Wrists|Around the waist|Behind the ears", kap_f$Q10, ignore.case = TRUE), 1, 0)
+kap_f$s11 <- ifelse(grepl("From medical professional|From extension|From the veterinarian|All", kap_f$Q11, ignore.case = TRUE), 1, 0)
+kap_f$s12 <- ifelse(grepl("Yes|Maybe", kap_f$Q12, ignore.case = TRUE), 1, 0)
+kap_f$s13 <- ifelse(grepl("In the grass|In the forest|Along the sides of trails|On animal's skin or coat|Edges of cattle pasture/fence rows", kap_f$Q13, ignore.case = TRUE), 1, 0)
+kap_f$s14 <- ifelse(grepl("Spring months|Summer months|Autumn months|Winter months|Throughout the year", kap_f$Q14, ignore.case = TRUE), 1, 0)
+kap_f$s15 <- ifelse(grepl("White-tailed deer|White-footed mouse|Cats & Dogs|Humans|Birds|Livestock animals", kap_f$Q15, ignore.case = TRUE), 1, 0)
+kap_f$s16 <- ifelse(grepl("Fever and chills|Rash|lesions, ulcers, or other skin reactions|Headache|stiff neck|Difficulty breathing|Allergies|Pain in the joints|muscle pains|Fatigue|Other", kap_f$Q16, ignore.case = TRUE), 1, 0)
+kap_f$s17 <- ifelse(grepl("Through the bite of an infected tick|Through consumption of infected animal meat or animal byproducts", kap_f$Q17, ignore.case = TRUE), 1, 0)
+kap_f$s18 <- ifelse(grepl("Yes|Maybe", kap_f$Q18, ignore.case = TRUE), 1, 0)
+kap_f$s19 <- ifelse(grepl("Yes|Maybe", kap_f$Q19, ignore.case = TRUE), 1, 0)
+kap_f$s20 <- ifelse(grepl("Yes|Maybe", kap_f$Q20, ignore.case = TRUE), 1, 0)
+kap_f$s21 <- ifelse(grepl("11-24 hours|24 hours", kap_f$Q21, ignore.case = TRUE), 1, 0)
+kap_f$s22 <- ifelse(grepl("Yes|Maybe", kap_f$Q22, ignore.case = TRUE), 1, 0)
+kap_f$s23 <- ifelse(grepl("Yes|Maybe", kap_f$Q23, ignore.case = TRUE), 1, 0)
+kap_f$s24 <- ifelse(grepl("Very concerned|concerned|mildly concerned", kap_f$Q24, ignore.case = TRUE), 1, 0)
+kap_f$s25 <- ifelse(grepl("Yes|Maybe", kap_f$Q25, ignore.case = TRUE), 1, 0)
+kap_f$s26 <- ifelse(grepl("Yes|Maybe", kap_f$Q26, ignore.case = TRUE), 1, 0)
+kap_f$s27 <- ifelse(grepl("Use tick repellant on self|Wear light-colored clothing|Wear hat/cap|Wear long-sleeved shirts and long pants|Tuck pants into boots|Wear permethrin-treated clothing|Other|Check yourself|Avoiding areas", kap_f$Q27, ignore.case = TRUE), 1, 0)
+kap_f$s28 <- ifelse(grepl("Applied once|Usually apply|Always apply|Sometimes apply tick", kap_f$Q28, ignore.case = TRUE), 1, 0)
+kap_f$s29 <- ifelse(grepl("Consult healthcare professional|Use an object to remove ticks|Use alcohol|Take a photo of the tick", kap_f$Q29, ignore.case = TRUE), 1, 0)
+kap_f$s30 <- ifelse(grepl("Consult healthcare professional|Use an object to remove ticks|Use alcohol|Take a phot|Freeze the tick|Store in container with alcohol|Throw away tick|Flush tick in toilet", kap_f$Q30, ignore.case = TRUE), 1, 0)
+kap_f$s31 <- ifelse(grepl("Yes|Maybe", kap_f$Q31, ignore.case = TRUE), 1, 0)
+kap_f$s32 <- ifelse(grepl("^\\s*\\d+\\s*$", kap_f$Q32), 1, 0)
+kap_f$s33 <- ifelse(grepl("Yes|Maybe|No", kap_f$Q33, ignore.case = TRUE), 1, 0)
+kap_f$s34 <- ifelse(grepl("Yes|Maybe|No", kap_f$Q34, ignore.case = TRUE), 1, 0)
+
+
+# Total score (summing binary scores)
+kap_f$score_total <- rowSums(kap_f[, paste0("s", 1:30)])
+
+#Set directory to save all outputs
+setwd("C:/Users/abrar/OneDrive - University of Illinois - Urbana/Documents/IRT Output")
+
+# Save and export
+save(kap_f, file = "kap_f_IRTScored.Rdata")
+write.csv(kap_f, "kap_f_IRTScored.csv", row.names = FALSE)
+
+
+#_________
+
+##Getting beta values from Rasch model (simple) to asses the difficulty of questions
+
+#select only cleaned answers for analysis
+kap_f_irt=dplyr::select(kap_f,s1,s2,s3,s4,s5,s6,s7,s8,s9,s10,s13,s14,s15,s16,s17,s19,s20,s21,s22,s23,s24,s27,s28,s29,s30,s31)
+
+#s18,s25,s26,s32,s33,s34 removed because of nature of the questions (opinion based)
+
+# Fit Rasch Model (The Rasch model is a type of Item Response Theory (IRT) model — specifically, the 1-Parameter Logistic (1PL) model)
+kap_f_rm = RM(kap_f_irt)
+
+#Get and Sort Item Difficulties (ranks questions from easiest (most negative) to hardest (most positive))
+betas_kap_f <- -coef(kap_f_rm)
+round(sort(betas_kap_f), 2)
+
+print(betas_kap_f)
+
+#s7,s17,s33,s34 has been removed due to Lack of Response Variability
+
+#_____
+
+
+# Function to normalize a vector between 0 and 1
+normalize <- function(x) {
+  return((x - min(x)) / (max(x) - min(x)))
+}
+
+# Normalizing
+betas_f <- -coef(kap_f_rm)  # Extract Beta values from Rasch model for Farmers
+betas_f_normalized <- normalize(betas_f)  # Normalize Beta values
+
+# Create a data frame with normalized Beta values and corresponding questions (s1, s2, ...)
+data_f <- data.frame(
+  Item = paste0("s", 1:length(betas_f)),  # Create item labels (s1, s2, s3, ...)
+  Beta = betas_f,
+  Normalized_Beta = betas_f_normalized
+)
+
+cat("Normalized Beta values for Farmers:\n")
+print(data_f)
+
+# Plot Normalized Beta Values for Farmers
+ggplot(data_f, aes(x = Item, y = Normalized_Beta)) +
+  geom_bar(stat = "identity", fill = "indianred", show.legend = FALSE) +  # Set color for bars
+  labs(title = "Normalized Beta Values (Farmers)",
+       x = "Item", y = "Normalized Beta") +
+  theme_minimal() +
+  theme(
+    panel.grid = element_blank(),  
+    plot.background = element_rect(fill = "white", color = NA),
+    panel.background = element_rect(fill = "white", color = NA),
+    axis.line = element_line(color = "black")  # X and Y axis lines
+  )
+
+# Save the plot
+ggsave("kap_f_Normalized_Beta_plot.png", width = 10, height = 6, dpi = 300)
+
+
+#_____
+
+## Model Fitting (Rasch, 2PL, 3PL)
+
+# Run Rasch, 2PL, and 3PL models 
+kap_f_rasch <- rasch(kap_f_irt)
+kap_f_2pl <- ltm(kap_f_irt ~ z1)     # Two-parameter logistic model
+kap_f_3pl <- tpm(kap_f_irt)          # Three-parameter logistic model (includes guessing)
+
+
+#_____
+
+##Model Evaluation
+
+# Extract AIC and BIC separately
+aic_values_f <- c(
+  Rasch = AIC(kap_f_rasch),
+  `2PL` = AIC(kap_f_2pl),
+  `3PL` = AIC(kap_f_3pl)
+)
+
+bic_values_f <- c(
+  Rasch = BIC(kap_f_rasch),
+  `2PL` = BIC(kap_f_2pl),
+  `3PL` = BIC(kap_f_3pl)
+)
+
+# Print results
+print(aic_values_f)
+print(bic_values_f)
+
+# Interpretation:
+# - Rasch model has the lowest AIC and BIC → indicating it is the best-fitting model for this dataset.
+# - 2PL and 3PL introduce more complexity, but do not improve model fit based on AIC or BIC.
+# - Therefore, the Rasch model is preferred for its simplicity and superior model fit in this case.
+
+
+# Compare estimated item difficulty parameters across models
+cor_rasch_2pl_f<- cor(coef(kap_f_rasch)[,1], coef(kap_f_2pl)[,1])
+cor_2pl_3pl_f   <- cor(coef(kap_f_2pl)[,1], coef(kap_f_3pl)[,1])
+cor_rasch_3pl_f  <- cor(coef(kap_f_rasch)[,1], coef(kap_f_3pl)[,1])
+
+cat("Correlation between Rasch and 2PL item difficulties for ph:", round(cor_rasch_2pl_f, 2), "\n")
+cat("Correlation between 2PL and 3PL item difficulties for ph:", round(cor_2pl_3pl_f, 2), "\n")
+cat("Correlation between Rasch and 3PL item difficulties for ph:", round(cor_rasch_3pl_f, 2), "\n")
+
+
+# Correlation between item difficulty parameters:
+# - Rasch vs. 2PL: r = 0.57 → moderate agreement in item difficulty estimates
+# - 2PL vs. 3PL: r = -0.12 → weak inverse correlation, indicating unstable parameter estimates in 3PL
+# - Rasch vs. 3PL: r = 0.06 → very weak agreement, confirming lack of consistency between models
+
+# Conclusion:
+# - The Rasch model is better due to lowest AIC/BIC and sufficient consistency with 2PL.
+# - The 3PL model does not offer improved fit and shows instability in difficulty estimates.
+# - For the farmers' group, Rasch provides a robust, interpretable, and well-fitting model.
+
+# Therefore, the 2PL model is better for interpretation and further analysis.
+
+#_____
+
+##Item Analysis & Visualization
+
+# ICC Plot
+# Prepare ICC data from actual item difficulties
+theta_vals <- seq(-4, 4, length.out = 300)
+icc_df <- do.call(rbind, lapply(names(betas_kap_f), function(item) {
+  beta <- betas_kap_f[item]
+  p <- exp(theta_vals - beta) / (1 + exp(theta_vals - beta))  # Rasch model formula
+  data.frame(theta = theta_vals, probability = p, item = item)
+}))
+
+# Plot ICCs using ggplot2
+ggplot(icc_df, aes(x = theta, y = probability, color = item)) +
+  geom_line(size = 1) +
+  theme_minimal(base_size = 14) +
+  labs(
+    title = "Item Characteristic Curves (Farmers)",
+    x = expression(theta ~ "(Latent Trait Ability)"),
+    y = "Probability of Correct Response",
+    color = "Item"
+  ) +
+  theme(
+    panel.grid = element_blank(),                             
+    panel.background = element_rect(fill = "white"),          
+    plot.background = element_rect(fill = "white"),           
+    axis.line = element_line(color = "black", size = 0.5),    
+    axis.ticks = element_line(color = "black")                
+  )
+
+# Save to file (optional)
+ggsave("kap_f_ICC_plot.png", width = 10, height = 6, dpi = 300)
+
+
+# Item Characteristic Curves (ICCs) plot shows how the probability of a correct response 
+# changes across different levels of latent ability (θ) for each item.
+#
+# - Negative θ values indicate lower ability or knowledge
+# - Positive θ values indicate higher ability
+# - θ = 0 represents average ability level
+#
+# Each curve represents one item (e.g., beta s2, beta s3, etc.).
+#
+# - The steepest point of each curve indicates where the item is most informative 
+#   (i.e., the difficulty level of the item)
+# - If a curve is shifted to the right → the item is harder 
+# - If a curve is shifted to the left → the item is easier 
+
+
+
+# Person-Item Map (Wright Map) 
+# Prepare data
+pp <- person.parameter(kap_f_rm)
+person_scores <- coef(pp)
+person_scores <- coef(pp)
+item_difficulties <- betas_kap_f
+
+# Data frames
+person_df <- data.frame(
+  location = person_scores,
+  type = "Person",
+  label = NA
+)
+
+item_df <- data.frame(
+  location = item_difficulties,
+  type = "Item",
+  label = names(item_difficulties)
+)
+
+# Combine
+map_df_f <- rbind(person_df, item_df)
+
+# Plot
+ggplot(map_df_f, aes(x = type, y = location)) +
+  geom_jitter(width = 0.15, size = 2, aes(color = type), show.legend = FALSE) +
+  
+  # Smarter label placement for items using ggrepel
+  ggrepel::geom_text_repel(
+    data = subset(map_df_f, type == "Item"),
+    aes(label = label),
+    nudge_x = 0.25,
+    size = 4,
+    direction = "y",
+    segment.color = "grey50",
+    max.overlaps = 10
+  ) +
+
+  scale_color_manual(values = c("Person" = "skyblue", "Item" = "firebrick")) +
+  
+  theme_minimal(base_size = 14) +
+  theme(
+    axis.title.x = element_text(size = 14, margin = margin(t = 10)),
+    axis.title.y = element_text(size = 14, margin = margin(r = 10)),
+    axis.text.x = element_text(size = 12),
+    axis.text.y = element_text(size = 12),
+    panel.grid = element_blank(),
+    panel.background = element_rect(fill = "white"),
+    plot.background = element_rect(fill = "white"),
+    axis.line = element_line(color = "black"),
+    axis.ticks = element_line(color = "black")
+  ) +
+  labs(
+    title = "Person-Item Map (Farmers)",
+    x = "Type",
+    y = "Latent Trait (Logit Scale)"
+  ) +
+  coord_flip(clip = "off")  # allows labels outside plot area
+
+ggsave("kap_f_PersonItem_map.png", width = 10, height = 6, dpi = 300, bg = "white")
+
+
+# This map aligns item difficulties and person abilities on the **x-axis**, 
+# which represents the latent trait scale (logit scale, θ).
+#
+# 🔴 Red dots = Items (e.g., beta s2, beta s5), shown on the "Item" row
+# 🔵 Blue dots = Persons (participants), shown on the "Person" row
+#
+# Interpretation:
+# - Dots further to the right = higher ability (for persons) or harder item (for items)
+# - Dots further to the left = lower ability or easier item
+#
+# - If person and item dots align along the x-axis → well-targeted item
+# - If most persons are to the **right** of items → the test may be **too easy**
+# - If most persons are to the **left** of items → the test may be **too hard**
+
+
+# Proportion correct plot
+# Calculate proportion of correct responses per item
+rf_kap_f <- response.frequencies(kap_f_irt)
+prop_correct_f <- rf_kap_f[, 2]  # Second column is proportion correct
+
+# Create a plot of proportion correct per question
+item_names_f <- names(kap_f_irt)
+df_correct_f <- data.frame(item = item_names_f, prop_correct_f = prop_correct_f)
+
+ggplot(df_correct_f, aes(x = reorder(item, -prop_correct_f), y = prop_correct_f)) +
+  geom_bar(stat = "identity", fill = "steelblue4") +
+  coord_flip() +
+  labs(title = "Proportion Correct Plot (Farmers)", x = "Item", y = "Proportion Correct") +
+  theme_minimal() +
+  theme(
+    plot.background = element_rect(fill = "white", color = NA),
+    panel.background = element_rect(fill = "white", color = NA),
+    panel.grid = element_blank(),                          
+    axis.line = element_line(color = "black", size = 0.5), 
+    axis.ticks = element_line(color = "black")             
+  )
+
+ggsave("kap_f_PropCorrect.tif", width = 9, height = 6, dpi = 300, bg = "white") 
+
+
+# This plot shows the proportion of participants who answered each item correctly —
+# a simple and intuitive measure of item difficulty.
+#
+# - Higher bars indicate easier items (more participants got them correct)
+# - Lower bars indicate harder items (fewer participants got them correct)
+
+#_______
+
+# Calculate ULI for Farmers
+upper_threshold_f <- quantile(kap_f$score_total, 0.73)
+lower_threshold_f <- quantile(kap_f$score_total, 0.27)
+
+upper_group_f <- kap_f[kap_f$score_total >= upper_threshold_f, ]
+lower_group_f <- kap_f[kap_f$score_total <= lower_threshold_f, ]
+
+upper_correct_f <- colMeans(upper_group_f[,c("s1","s2","s3","s4","s5","s6","s7","s8","s9","s10","s13","s14","s15","s16","s17","s19","s20","s21","s22","s23","s24","s27","s28","s29","s30","s31"
+)])
+lower_correct_f <- colMeans(lower_group_f[,c("s1","s2","s3","s4","s5","s6","s7","s8","s9","s10","s13","s14","s15","s16","s17","s19","s20","s21","s22","s23","s24","s27","s28","s29","s30","s31"
+)])
+
+uli_f_normailized <- (upper_correct_f - lower_correct_f) / (upper_correct_f + lower_correct_f)
+
+uli_f <-  upper_correct_f - lower_correct_f
+
+# Create data.frame for plotting
+data_f <- data.frame(
+  Item = c("s1","s2","s3","s4","s5","s6","s7","s8","s9","s10","s13","s14","s15","s16","s17","s19","s20","s21","s22","s23","s24","s27","s28","s29","s30","s31"),
+  ULI = uli_f
+)
+
+print(data_f)
+
+# Plot ULI for Farmers using ggplot
+ggplot(data_f, aes(x = Item, y = ULI)) +
+  geom_bar(stat = "identity", fill = "skyblue4", show.legend = FALSE) +  # Set a single color for all bars
+  labs(title = "Upper-Lower Index (Farmers)",
+       x = "Item", y = "Upper-Lower Index (ULI)") +
+  theme_minimal() +
+  theme(
+    panel.grid = element_blank(),  
+    plot.background = element_rect(fill = "white", color = NA),
+    panel.background = element_rect(fill = "white", color = NA),
+    axis.line = element_line(color = "black")  # X and Y axis lines
+  )
+
+# Save the plot
+ggsave("kap_f_ULI_plot.png", width = 10, height = 6, dpi = 300)
+
+
+```
+
+
+
